@@ -109,6 +109,7 @@
       position: relative;
       overflow: hidden;
     }
+    #config-section { overflow: visible; }
     .card::before {
       content: '';
       position: absolute;
@@ -187,23 +188,37 @@
     .autocomplete-wrap input { margin-bottom: 0; }
     .autocomplete-list {
       position: absolute;
-      top: calc(100% + 4px); left: 0; right: 0;
+      top: 100%; 
+      left: 0; 
+      right: 0;
       background: var(--card);
       border: 1px solid var(--border2);
       border-radius: 8px;
-      z-index: 100;
-      overflow: hidden;
+      z-index: 999;
+      max-height: 300px;
+      overflow-y: auto;
+      overflow-x: hidden;
       display: none;
+      margin: 4px 0 0 0;
+      padding: 0;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     }
-    .autocomplete-list.open { display: block; }
+    .autocomplete-list.open { 
+      display: block !important;
+    }
     .autocomplete-item {
-      padding: 10px 14px;
+      padding: 12px 14px;
       font-size: 14px;
       cursor: pointer;
       transition: background .15s;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      color: var(--text);
     }
-    .autocomplete-item:hover, .autocomplete-item.selected { background: rgba(0,229,255,.1); color: var(--accent); }
+    .autocomplete-item:last-child { border-bottom: none; }
+    .autocomplete-item:hover, .autocomplete-item.selected { 
+      background: rgba(0,229,255,.2); 
+      color: var(--accent); 
+    }
 
     /* ── Buttons ── */
     .btn {
@@ -697,13 +712,13 @@
 
       <label>Start Page</label>
       <div class="autocomplete-wrap">
-        <input type="text" id="config-start" placeholder="e.g. Albert Einstein" oninput="autocomplete(this,'start-list')" onkeydown="acKeydown(event,'start-list','config-start')">
+        <input type="text" id="config-start" placeholder="e.g. Albert Einstein" oninput="onConfigInput(this,'start-list')" onkeydown="acKeydown(event,'start-list','config-start')">
         <div class="autocomplete-list" id="start-list"></div>
       </div>
 
       <label>End Page (Target)</label>
       <div class="autocomplete-wrap">
-        <input type="text" id="config-end" placeholder="e.g. Quantum mechanics" oninput="autocomplete(this,'end-list')" onkeydown="acKeydown(event,'end-list','config-end')">
+        <input type="text" id="config-end" placeholder="e.g. Quantum mechanics" oninput="onConfigInput(this,'end-list')" onkeydown="acKeydown(event,'end-list','config-end')">
         <div class="autocomplete-list" id="end-list"></div>
       </div>
 
@@ -862,8 +877,19 @@ socket.on('error', ({ message }) => toast(message));
 function enterLobby(code, room) {
   document.getElementById('lobby-code').textContent = code;
   renderPlayers(room);
-  document.getElementById('config-section').style.display = isLeader ? 'block' : 'none';
-  document.getElementById('config-view').style.display = isLeader ? 'none' : 'block';
+  
+  const configSection = document.getElementById('config-section');
+  const configView = document.getElementById('config-view');
+  
+  if (isLeader) {
+    configSection.style.display = 'block';
+    configView.style.display = 'none';
+  } else {
+    configSection.style.display = 'none';
+    configView.style.display = 'block';
+    updateConfigView(room.config);
+  }
+  
   showScreen('lobby');
 }
 
@@ -880,18 +906,35 @@ function renderPlayers(room) {
 }
 
 function updateConfigView(config) {
+  
+  // Update the view section (for non-leaders)
   document.getElementById('view-lang').textContent = config.lang || '—';
   document.getElementById('view-start').textContent = config.startPage || '—';
   document.getElementById('view-end').textContent = config.endPage || '—';
-  if (isLeader) {
-    const l = document.getElementById('config-lang');
-    if (l.value !== config.lang && config.lang) l.value = config.lang;
+  
+  // Also update the input fields if leader (so they see their data after navigating away/back)
+  if (isLeader && config.lang) {
+    const langEl = document.getElementById('config-lang');
+    if (langEl && config.lang) {
+      langEl.value = config.lang;
+    }
+    const startEl = document.getElementById('config-start');
+    const endEl = document.getElementById('config-end');
+    if (startEl && config.startPage) {
+      startEl.value = config.startPage;
+    }
+    if (endEl && config.endPage) {
+      endEl.value = config.endPage;
+    }
   }
 }
 
 socket.on('playerJoined', ({ room }) => {
   currentRoom = room;
   renderPlayers(room);
+  if (!isLeader) {
+    updateConfigView(room.config);
+  }
 });
 socket.on('playerLeft', ({ room }) => {
   currentRoom = room;
@@ -904,10 +947,17 @@ socket.on('leaderChanged', ({ newLeaderId }) => {
     document.getElementById('config-section').style.display = 'block';
     document.getElementById('config-view').style.display = 'none';
     toast('You are now the leader!', 'success');
+  } else {
+    isLeader = false;
+    document.getElementById('config-section').style.display = 'none';
+    document.getElementById('config-view').style.display = 'block';
   }
 });
 socket.on('configUpdated', ({ config }) => {
-  updateConfigView(config);
+  currentRoom.config = config;
+  if (!isLeader) {
+    updateConfigView(config);
+  }
 });
 
 socket.on('returnedToLobby', ({ room }) => {
@@ -928,29 +978,67 @@ function leaveRoom() {
 }
 
 // ── Config / Autocomplete ─────────────────────────────────────
+let configUpdateTimeout = null;
 function updateConfig() {
   const lang = document.getElementById('config-lang').value;
   const startPage = document.getElementById('config-start').value.trim();
   const endPage = document.getElementById('config-end').value.trim();
-  socket.emit('updateConfig', { lang, startPage, endPage });
+  
+  clearTimeout(configUpdateTimeout);
+  configUpdateTimeout = setTimeout(() => {
+    socket.emit('updateConfig', { lang, startPage, endPage });
+  }, 300);
+}
+
+function onConfigInput(input, listId) {
+  autocomplete(input, listId);
+  updateConfig();
 }
 
 let acDebounce = {};
+
 function autocomplete(input, listId) {
   const q = input.value.trim();
   const list = document.getElementById(listId);
-  updateConfig();
+  if (!list) return;
+  
   clearTimeout(acDebounce[listId]);
-  if (q.length < 2) { list.classList.remove('open'); return; }
+  
+  // Close list if too short
+  if (q.length < 2) {
+    list.classList.remove('open');
+    list.innerHTML = '';
+    return;
+  }
+  
+  // Debounce the fetch
   acDebounce[listId] = setTimeout(async () => {
     const lang = document.getElementById('config-lang')?.value || 'en';
+    const url = `/api/search?q=${encodeURIComponent(q)}&lang=${lang}`;
+    
     try {
-      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&lang=${lang}`);
-      const results = await r.json();
-      list.innerHTML = results.map(s => `<div class="autocomplete-item" onclick="selectAc(this,'${listId}')">${s}</div>`).join('');
-      list.classList.toggle('open', results.length > 0);
-    } catch {}
-  }, 220);
+      const response = await fetch(url);
+      
+      const results = await response.json();
+      
+      if (!Array.isArray(results) || results.length === 0) {
+        list.classList.remove('open');
+        list.innerHTML = '';
+        return;
+      }
+      
+      // Build HTML
+      let html = '';
+      for (let i = 0; i < results.length; i++) {
+        html += `<div class="autocomplete-item" onclick="selectAc(this, '${listId}')">${results[i]}</div>`;
+      }
+      
+      list.innerHTML = html;
+      list.classList.add('open');
+    } catch (error) {
+      list.classList.remove('open');
+    }
+  }, 200);
 }
 
 function selectAc(el, listId) {
@@ -966,10 +1054,18 @@ function acKeydown(e, listId, inputId) {
   const items = list.querySelectorAll('.autocomplete-item');
   const selected = list.querySelector('.selected');
   let idx = Array.from(items).indexOf(selected);
+  
   if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx+1, items.length-1); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx-1, 0); }
-  else if (e.key === 'Enter' && selected) { selectAc(selected, listId); return; }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx-1, -1); }
+  else if (e.key === 'Enter') {
+    if (selected) {
+      e.preventDefault();
+      selectAc(selected, listId);
+    }
+    return;
+  }
   else if (e.key === 'Escape') { list.classList.remove('open'); return; }
+  
   items.forEach((it,i) => it.classList.toggle('selected', i===idx));
 }
 
