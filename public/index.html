@@ -822,6 +822,43 @@ let isLeader = false;
 let timerInterval = null;
 let startTime = null;
 let mySteps = 0;
+let lastRenderedPlayersKey = '';
+let lastRenderedConfigKey = '';
+let lastSentConfigKey = '';
+let configUpdateTimeout = null;
+let acDebounce = {};
+let acAbortControllers = {};
+let acCache = new Map();
+
+function serializeConfig(config) {
+  return `${config.lang || 'en'}|${config.startPage || ''}|${config.endPage || ''}`;
+}
+
+function getCurrentConfigState() {
+  return {
+    lang: document.getElementById('config-lang').value,
+    startPage: document.getElementById('config-start').value.trim(),
+    endPage: document.getElementById('config-end').value.trim()
+  };
+}
+
+function syncConfigNow() {
+  if (!isLeader) return;
+
+  const config = getCurrentConfigState();
+  const configKey = serializeConfig(config);
+  if (configKey === lastSentConfigKey) return;
+
+  lastSentConfigKey = configKey;
+  socket.emit('updateConfig', config);
+}
+
+function scheduleConfigSync() {
+  if (!isLeader) return;
+
+  clearTimeout(configUpdateTimeout);
+  configUpdateTimeout = setTimeout(syncConfigNow, 300);
+}
 
 // ── Socket ID ──────────────────────────────────────────────────
 socket.on('connect', () => { myId = socket.id; });
@@ -876,7 +913,9 @@ socket.on('error', ({ message }) => toast(message));
 // ── Lobby ─────────────────────────────────────────────────────
 function enterLobby(code, room) {
   document.getElementById('lobby-code').textContent = code;
+  lastRenderedPlayersKey = '';
   renderPlayers(room);
+  lastRenderedConfigKey = '';
   
   const configSection = document.getElementById('config-section');
   const configView = document.getElementById('config-view');
@@ -884,6 +923,7 @@ function enterLobby(code, room) {
   if (isLeader) {
     configSection.style.display = 'block';
     configView.style.display = 'none';
+    lastSentConfigKey = serializeConfig(room.config || {});
   } else {
     configSection.style.display = 'none';
     configView.style.display = 'block';
@@ -896,6 +936,10 @@ function enterLobby(code, room) {
 function renderPlayers(room) {
   const list = document.getElementById('players-list');
   const colors = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7'];
+  const renderKey = `${myId}|${room.leader}|${room.players.map(p => `${p.id}:${p.name}:${p.finished ? 1 : 0}`).join('|')}`;
+  if (renderKey === lastRenderedPlayersKey) return;
+  lastRenderedPlayersKey = renderKey;
+
   list.innerHTML = room.players.map((p,i) => `
     <div class="player-row">
       <div class="player-avatar ${colors[i%8]}">${p.name[0].toUpperCase()}</div>
@@ -906,7 +950,11 @@ function renderPlayers(room) {
 }
 
 function updateConfigView(config) {
-  
+  config = config || {};
+  const configKey = `${isLeader ? 'leader' : 'viewer'}|${serializeConfig(config || {})}`;
+  if (configKey === lastRenderedConfigKey) return;
+  lastRenderedConfigKey = configKey;
+
   // Update the view section (for non-leaders)
   document.getElementById('view-lang').textContent = config.lang || '—';
   document.getElementById('view-start').textContent = config.startPage || '—';
@@ -955,6 +1003,7 @@ socket.on('leaderChanged', ({ newLeaderId }) => {
 });
 socket.on('configUpdated', ({ config }) => {
   currentRoom.config = config;
+  lastSentConfigKey = serializeConfig(config || {});
   if (!isLeader) {
     updateConfigView(config);
   }
@@ -978,16 +1027,8 @@ function leaveRoom() {
 }
 
 // ── Config / Autocomplete ─────────────────────────────────────
-let configUpdateTimeout = null;
 function updateConfig() {
-  const lang = document.getElementById('config-lang').value;
-  const startPage = document.getElementById('config-start').value.trim();
-  const endPage = document.getElementById('config-end').value.trim();
-  
-  clearTimeout(configUpdateTimeout);
-  configUpdateTimeout = setTimeout(() => {
-    socket.emit('updateConfig', { lang, startPage, endPage });
-  }, 300);
+  scheduleConfigSync();
 }
 
 function onConfigInput(input, listId) {
@@ -995,14 +1036,15 @@ function onConfigInput(input, listId) {
   updateConfig();
 }
 
-let acDebounce = {};
-
 function autocomplete(input, listId) {
   const q = input.value.trim();
   const list = document.getElementById(listId);
   if (!list) return;
   
   clearTimeout(acDebounce[listId]);
+  if (acAbortControllers[listId]) {
+    acAbortControllers[listId].abort();
+  }
   
   // Close list if too short
   if (q.length < 2) {
@@ -1015,9 +1057,19 @@ function autocomplete(input, listId) {
   acDebounce[listId] = setTimeout(async () => {
     const lang = document.getElementById('config-lang')?.value || 'en';
     const url = `/api/search?q=${encodeURIComponent(q)}&lang=${lang}`;
+    const cacheKey = `${lang}|${q.toLowerCase()}`;
+    const cachedResults = acCache.get(cacheKey);
+
+    if (cachedResults) {
+      renderAutocompleteResults(list, listId, cachedResults);
+      return;
+    }
+
+    const controller = new AbortController();
+    acAbortControllers[listId] = controller;
     
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
       
       const results = await response.json();
       
@@ -1027,18 +1079,28 @@ function autocomplete(input, listId) {
         return;
       }
       
-      // Build HTML
-      let html = '';
-      for (let i = 0; i < results.length; i++) {
-        html += `<div class="autocomplete-item" onclick="selectAc(this, '${listId}')">${results[i]}</div>`;
-      }
-      
-      list.innerHTML = html;
-      list.classList.add('open');
+      acCache.set(cacheKey, results);
+      renderAutocompleteResults(list, listId, results);
     } catch (error) {
-      list.classList.remove('open');
+      if (error.name !== 'AbortError') {
+        list.classList.remove('open');
+      }
+    } finally {
+      if (acAbortControllers[listId] === controller) {
+        delete acAbortControllers[listId];
+      }
     }
   }, 200);
+}
+
+function renderAutocompleteResults(list, listId, results) {
+  let html = '';
+  for (let i = 0; i < results.length; i++) {
+    html += `<div class="autocomplete-item" onclick="selectAc(this, '${listId}')">${results[i]}</div>`;
+  }
+
+  list.innerHTML = html;
+  list.classList.add('open');
 }
 
 function selectAc(el, listId) {
@@ -1082,7 +1144,7 @@ function startGame() {
   const end = document.getElementById('config-end').value.trim();
   if (!start || !end) return toast('Set start and end pages');
   if (start === end) return toast('Start and end must differ');
-  updateConfig();
+  syncConfigNow();
   socket.emit('startGame');
 }
 
@@ -1128,12 +1190,15 @@ function launchCountdown(config) {
 // ── Timer ─────────────────────────────────────────────────────
 function startTimer() {
   clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
+  const tick = () => {
     const elapsed = Date.now() - startTime;
     const s = Math.floor(elapsed / 1000);
     const m = Math.floor(s / 60);
     document.getElementById('hud-timer').textContent = `${m}:${String(s%60).padStart(2,'0')}`;
-  }, 500);
+  };
+
+  tick();
+  timerInterval = setInterval(tick, 1000);
 }
 
 function stopTimer() { clearInterval(timerInterval); }
