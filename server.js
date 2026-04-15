@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const compression = require('compression');
 const path = require('path');
 
 const app = express();
@@ -11,11 +12,60 @@ const io = new Server(server, {
   cors: { origin: '*' }
 });
 
+app.use(compression());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── In-memory room store ───────────────────────────────────────────────────
 const rooms = {};
+const searchCache = new Map();
+const pageExistsCache = new Map();
+const wikiPageCache = new Map();
+const SEARCH_CACHE_TTL = 60 * 1000;
+const PAGE_EXISTS_CACHE_TTL = 10 * 60 * 1000;
+const WIKI_PAGE_CACHE_TTL = 10 * 60 * 1000;
+
+function normalizeWikiKey(lang, title) {
+  return `${String(lang || 'en').toLowerCase()}:${String(title || '').trim().replace(/_/g, ' ').toLowerCase()}`;
+}
+
+function getCachedEntry(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function setCachedEntry(cache, key, value, ttl) {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttl
+  });
+}
+
+function pruneExpiredCache(cache) {
+  const now = Date.now();
+  for (const [key, entry] of cache.entries()) {
+    if (entry.expiresAt <= now) {
+      cache.delete(key);
+    }
+  }
+}
+
+const cacheCleanupTimer = setInterval(() => {
+  pruneExpiredCache(searchCache);
+  pruneExpiredCache(pageExistsCache);
+  pruneExpiredCache(wikiPageCache);
+}, 5 * 60 * 1000);
+
+if (typeof cacheCleanupTimer.unref === 'function') {
+  cacheCleanupTimer.unref();
+}
 
 function generateCode() {
   return Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -24,6 +74,10 @@ function generateCode() {
 async function wikiPageExists(lang, title) {
   if (!title) return false;
 
+  const cacheKey = normalizeWikiKey(lang, title);
+  const cached = getCachedEntry(pageExistsCache, cacheKey);
+  if (cached !== null) return cached;
+
   const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&format=json&origin=*`;
   const headers = {
     'User-Agent': 'WikiRaceUltimate/1.0 (local multiplayer game)'
@@ -31,9 +85,14 @@ async function wikiPageExists(lang, title) {
 
   const { data } = await axios.get(url, { timeout: 7000, headers });
   const pages = data?.query?.pages;
-  if (!pages || typeof pages !== 'object') return false;
+  if (!pages || typeof pages !== 'object') {
+    setCachedEntry(pageExistsCache, cacheKey, false, PAGE_EXISTS_CACHE_TTL);
+    return false;
+  }
 
-  return Object.values(pages).some(page => !Object.prototype.hasOwnProperty.call(page, 'missing'));
+  const exists = Object.values(pages).some(page => !Object.prototype.hasOwnProperty.call(page, 'missing'));
+  setCachedEntry(pageExistsCache, cacheKey, exists, PAGE_EXISTS_CACHE_TTL);
+  return exists;
 }
 
 // ─── Popular pages database ─────────────────────────────────────────────────
@@ -59,6 +118,13 @@ app.get('/api/search', async (req, res) => {
   const { q, lang = 'en' } = req.query;
   if (!q || q.length < 2) return res.json([]);
 
+  const cacheKey = `${String(lang).toLowerCase()}|${String(q).trim().toLowerCase()}`;
+  const cachedResults = getCachedEntry(searchCache, cacheKey);
+  if (cachedResults) {
+    res.set('Cache-Control', 'public, max-age=60');
+    return res.json(cachedResults);
+  }
+
   const headers = {
     'User-Agent': 'WikiRaceUltimate/1.0 (local multiplayer game)'
   };
@@ -71,6 +137,8 @@ app.get('/api/search', async (req, res) => {
 
   // Return local matches immediately if we have them
   if (localMatches.length >= 3) {
+    setCachedEntry(searchCache, cacheKey, localMatches, SEARCH_CACHE_TTL);
+    res.set('Cache-Control', 'public, max-age=60');
     return res.json(localMatches);
   }
 
@@ -83,17 +151,30 @@ app.get('/api/search', async (req, res) => {
     if (suggestions.length > 0) {
       // Combine and deduplicate
       const combined = [...new Set([...localMatches, ...suggestions])];
-      return res.json(combined.slice(0, 10));
+      const response = combined.slice(0, 10);
+      setCachedEntry(searchCache, cacheKey, response, SEARCH_CACHE_TTL);
+      res.set('Cache-Control', 'public, max-age=60');
+      return res.json(response);
     }
   } catch (err) {}
 
   // Final fallback: return local matches
+  setCachedEntry(searchCache, cacheKey, localMatches, SEARCH_CACHE_TTL);
+  res.set('Cache-Control', 'public, max-age=60');
   return res.json(localMatches);
 });
 
 // ─── Wikipedia proxy ─────────────────────────────────────────────────────────
 app.get('/wiki/:lang/:title', async (req, res) => {
   const { lang, title } = req.params;
+
+  const cacheKey = normalizeWikiKey(lang, title);
+  const cachedPage = getCachedEntry(wikiPageCache, cacheKey);
+  if (cachedPage) {
+    res.set('Cache-Control', 'public, max-age=300');
+    return res.send(cachedPage);
+  }
+
   try {
     const wikiUrl = `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title)}`;
     const { data: html } = await axios.get(wikiUrl, {
@@ -124,7 +205,7 @@ app.get('/wiki/:lang/:title', async (req, res) => {
     const content = $('#mw-content-text').html() || $('body').html();
     const pageTitle = $('#firstHeading').text() || title;
 
-    res.send(`
+    const htmlResponse = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -163,7 +244,11 @@ app.get('/wiki/:lang/:title', async (req, res) => {
     document.addEventListener('contextmenu', e => e.preventDefault());
   </script>
 </body>
-</html>`);
+</html>`;
+
+    setCachedEntry(wikiPageCache, cacheKey, htmlResponse, WIKI_PAGE_CACHE_TTL);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(htmlResponse);
   } catch (err) {
     res.status(500).send(`<h2>Error loading Wikipedia page: ${err.message}</h2>`);
   }
@@ -192,7 +277,8 @@ io.on('connection', (socket) => {
     };
     socket.join(code);
     socket.data.room = code;
-    socket.emit('roomCreated', { code, room: sanitizeRoom(rooms[code]) });
+    const room = sanitizeRoom(rooms[code]);
+    socket.emit('roomCreated', { code, room });
   });
 
   // ── Join room ──
@@ -211,8 +297,9 @@ io.on('connection', (socket) => {
     };
     socket.join(code);
     socket.data.room = code;
-    socket.emit('joinedRoom', { code, room: sanitizeRoom(room) });
-    io.to(code).emit('playerJoined', { room: sanitizeRoom(room) });
+    const safeRoom = sanitizeRoom(room);
+    socket.emit('joinedRoom', { code, room: safeRoom });
+    io.to(code).emit('playerJoined', { room: safeRoom });
   });
 
   // ── Update config (leader only) ──
@@ -293,7 +380,8 @@ io.on('connection', (socket) => {
       p.finishedAt = null;
     });
 
-    io.to(code).emit('returnedToLobby', { room: sanitizeRoom(room) });
+    const safeRoom = sanitizeRoom(room);
+    io.to(code).emit('returnedToLobby', { room: safeRoom });
   });
 
   // ── Player navigated to a page ──
@@ -360,7 +448,8 @@ io.on('connection', (socket) => {
       io.to(code).emit('leaderChanged', { newLeaderId: room.leader });
     }
 
-    io.to(code).emit('playerLeft', { playerId: socket.id, playerName, room: sanitizeRoom(room) });
+    const safeRoom = sanitizeRoom(room);
+    io.to(code).emit('playerLeft', { playerId: socket.id, playerName, room: safeRoom });
   });
 });
 
