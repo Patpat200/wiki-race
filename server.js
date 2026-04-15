@@ -36,6 +36,24 @@ async function wikiPageExists(lang, title) {
   return Object.values(pages).some(page => !Object.prototype.hasOwnProperty.call(page, 'missing'));
 }
 
+// ─── Popular pages database ─────────────────────────────────────────────────
+const popularPages = {
+  en: ['Albert Einstein', 'Isaac Newton', 'Marie Curie', 'Stephen Hawking', 'Nikola Tesla',
+       'Charles Darwin', 'Galileo Galilei', 'Carl Sagan', 'Richard Feynman', 'Alan Turing',
+       'Computer', 'Physics', 'Biology', 'Chemistry', 'Mathematics', 'History', 'Art',
+       'Music', 'Literature', 'Science', 'Technology', 'Space', 'Universe', 'Quantum mechanics',
+       'Theory of relativity', 'DNA', 'Evolution', 'Internet', 'Artificial intelligence'],
+  fr: ['Albert Einstein', 'Isaac Newton', 'Marie Curie', 'Nikola Tesla', 'Charles Darwin',
+       'Informatique', 'Physique', 'Biologie', 'Chimie', 'Mathématiques', 'Histoire', 'Art',
+       'Musique', 'Littérature', 'Science', 'Technologie', 'Espace', 'Univers'],
+  es: ['Albert Einstein', 'Isaac Newton', 'Marie Curie', 'Nikola Tesla', 'Charles Darwin',
+       'Informática', 'Física', 'Biología', 'Química', 'Matemáticas', 'Historia', 'Arte',
+       'Música', 'Literatura', 'Ciencia', 'Tecnología', 'Espacio', 'Universo'],
+  de: ['Albert Einstein', 'Isaac Newton', 'Marie Curie', 'Nikola Tesla', 'Charles Darwin',
+       'Informatik', 'Physik', 'Biologie', 'Chemie', 'Mathematik', 'Geschichte', 'Kunst',
+       'Musik', 'Literatur', 'Wissenschaft', 'Technologie', 'Weltraum', 'Universum']
+};
+
 // ─── Wikipedia autocomplete ──────────────────────────────────────────────────
 app.get('/api/search', async (req, res) => {
   const { q, lang = 'en' } = req.query;
@@ -45,28 +63,32 @@ app.get('/api/search', async (req, res) => {
     'User-Agent': 'WikiRaceUltimate/1.0 (local multiplayer game)'
   };
 
-  try {
-    const url = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=8&namespace=0&format=json&origin=*`;
-    const { data } = await axios.get(url, { timeout: 5000, headers });
-    const suggestions = Array.isArray(data) ? (data[1] || []) : [];
-    return res.json(suggestions);
-  } catch (openSearchErr) {
-    try {
-      // Fallback API if OpenSearch is blocked for this runtime/request profile.
-      const fallbackUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=prefixsearch&pssearch=${encodeURIComponent(q)}&pslimit=8&format=json&origin=*`;
-      const { data } = await axios.get(fallbackUrl, { timeout: 5000, headers });
-      const suggestions = data?.query?.prefixsearch?.map(item => item.title).filter(Boolean) || [];
-      return res.json(suggestions);
-    } catch (fallbackErr) {
-      console.warn('[search] autocomplete failed:', {
-        q,
-        lang,
-        openSearchStatus: openSearchErr.response?.status,
-        fallbackStatus: fallbackErr.response?.status
-      });
-      return res.json([]);
-    }
+  // Get local popular pages first
+  const pages = popularPages[lang] || popularPages.en;
+  const localMatches = pages
+    .filter(p => p.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 8);
+
+  // Return local matches immediately if we have them
+  if (localMatches.length >= 3) {
+    return res.json(localMatches);
   }
+
+  // Try Wikipedia API with short timeout
+  try {
+    const url = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=10&namespace=0&format=json`;
+    const { data } = await axios.get(url, { timeout: 2000, headers });
+    const suggestions = Array.isArray(data) && data[1] ? data[1] : [];
+    
+    if (suggestions.length > 0) {
+      // Combine and deduplicate
+      const combined = [...new Set([...localMatches, ...suggestions])];
+      return res.json(combined.slice(0, 10));
+    }
+  } catch (err) {}
+
+  // Final fallback: return local matches
+  return res.json(localMatches);
 });
 
 // ─── Wikipedia proxy ─────────────────────────────────────────────────────────
@@ -149,8 +171,6 @@ app.get('/wiki/:lang/:title', async (req, res) => {
 
 // ─── Socket.io game logic ────────────────────────────────────────────────────
 io.on('connection', (socket) => {
-  console.log(`[+] Connected: ${socket.id}`);
-
   // ── Create room ──
   socket.on('createRoom', ({ playerName }) => {
     const code = generateCode();
@@ -173,7 +193,6 @@ io.on('connection', (socket) => {
     socket.join(code);
     socket.data.room = code;
     socket.emit('roomCreated', { code, room: sanitizeRoom(rooms[code]) });
-    console.log(`Room ${code} created by ${playerName}`);
   });
 
   // ── Join room ──
@@ -194,15 +213,25 @@ io.on('connection', (socket) => {
     socket.data.room = code;
     socket.emit('joinedRoom', { code, room: sanitizeRoom(room) });
     io.to(code).emit('playerJoined', { room: sanitizeRoom(room) });
-    console.log(`${playerName} joined room ${code}`);
   });
 
   // ── Update config (leader only) ──
   socket.on('updateConfig', ({ lang, startPage, endPage }) => {
     const code = socket.data.room;
     const room = rooms[code];
-    if (!room || room.leader !== socket.id) return;
-    room.config = { lang, startPage, endPage };
+    
+    if (!room) {
+      return socket.emit('error', { message: 'Room not found' });
+    }
+    
+    if (room.leader !== socket.id) {
+      return;
+    }
+    
+    // Update room config
+    room.config = { lang: lang || 'en', startPage: startPage || '', endPage: endPage || '' };
+
+    // BROADCAST to ALL players in this room
     io.to(code).emit('configUpdated', { config: room.config });
   });
 
@@ -246,7 +275,6 @@ io.on('connection', (socket) => {
       config: room.config,
       startTime: room.startTime
     });
-    console.log(`Game started in room ${code}: ${room.config.startPage} → ${room.config.endPage}`);
   });
 
   // ── Return to lobby ──
@@ -266,7 +294,6 @@ io.on('connection', (socket) => {
     });
 
     io.to(code).emit('returnedToLobby', { room: sanitizeRoom(room) });
-    console.log(`Room ${code} returned to lobby`);
   });
 
   // ── Player navigated to a page ──
@@ -310,7 +337,6 @@ io.on('connection', (socket) => {
           winnerTime: elapsed,
           results
         });
-        console.log(`${player.name} won room ${code} in ${(elapsed/1000).toFixed(1)}s`);
       }
     }
   });
@@ -325,7 +351,6 @@ io.on('connection', (socket) => {
 
     if (Object.keys(room.players).length === 0) {
       delete rooms[code];
-      console.log(`Room ${code} deleted (empty)`);
       return;
     }
 
@@ -336,7 +361,6 @@ io.on('connection', (socket) => {
     }
 
     io.to(code).emit('playerLeft', { playerId: socket.id, playerName, room: sanitizeRoom(room) });
-    console.log(`[-] ${playerName} left room ${code}`);
   });
 });
 
