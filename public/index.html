@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WikiRace — Ultimate Edition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #080a0f;
+      --surface:  #0e1117;
+      --card:     #131720;
+      --border:   #1e2535;
+      --border2:  #2a3347;
+      --accent:   #00e5ff;
+      --accent2:  #ff3d71;
+      --accent3:  #ffe234;
+      --text:     #e8eaf0;
+      --muted:    #6b7694;
+      --green:    #00f5a0;
+      --font-display: 'Bebas Neue', sans-serif;
+      --font-body:    'DM Sans', sans-serif;
+      --font-mono:    'JetBrains Mono', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      overflow-x: hidden;
+    }
+
+    /* ── Grid noise texture overlay ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(0,229,255,.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 90%, rgba(255,61,113,.05) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    /* ── Scanline effect ── */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.03) 2px,
+        rgba(0,0,0,.03) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* ── Screens ── */
+    .screen { display: none; position: relative; z-index: 1; }
+    .screen.active { display: flex; flex-direction: column; min-height: 100vh; align-items: center; justify-content: center; padding: 24px; }
+
+    /* ── Hero header ── */
+    .hero-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .hero-tag {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .2em;
+      color: var(--accent);
+      text-transform: uppercase;
+      border: 1px solid rgba(0,229,255,.3);
+      padding: 4px 12px;
+      border-radius: 100px;
+      margin-bottom: 16px;
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(56px, 10vw, 120px);
+      line-height: .9;
+      letter-spacing: .02em;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 50%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: 16px;
+      color: var(--muted);
+      margin-top: 12px;
+      letter-spacing: .05em;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      width: 100%;
+      max-width: 480px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: .4;
+    }
+
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 28px;
+      letter-spacing: .05em;
+      margin-bottom: 24px;
+      color: #fff;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .tab-btn.active {
+      background: rgba(0,229,255,.1);
+      color: var(--accent);
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── Form elements ── */
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    input[type="text"], select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 15px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      margin-bottom: 16px;
+    }
+    input[type="text"]:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,229,255,.1);
+    }
+    select option { background: var(--card); }
+
+    /* ── Autocomplete ── */
+    .autocomplete-wrap { position: relative; margin-bottom: 16px; }
+    .autocomplete-wrap input { margin-bottom: 0; }
+    .autocomplete-list {
+      position: absolute;
+      top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--card);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      z-index: 100;
+      overflow: hidden;
+      display: none;
+    }
+    .autocomplete-list.open { display: block; }
+    .autocomplete-item {
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background .15s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .autocomplete-item:hover, .autocomplete-item.selected { background: rgba(0,229,255,.1); color: var(--accent); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: none;
+      border-radius: 10px;
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      padding: 13px 24px;
+      transition: all .2s;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+      width: 100%;
+    }
+    .btn-primary:hover { background: #33ecff; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,229,255,.25); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--text);
+      width: 100%;
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-danger {
+      background: var(--accent2);
+      color: #fff;
+    }
+    .btn-danger:hover { filter: brightness(1.1); }
+    .btn-success {
+      background: var(--green);
+      color: #000;
+      width: 100%;
+    }
+    .btn-success:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; transform: none !important; }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 8px; }
+
+    /* ── Room code display ── */
+    .room-code-badge {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+    }
+    .room-code-label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+    .room-code-value {
+      font-family: var(--font-mono);
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--accent3);
+      letter-spacing: .2em;
+    }
+    .copy-btn {
+      background: rgba(255,226,52,.1);
+      border: 1px solid rgba(255,226,52,.2);
+      color: var(--accent3);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      transition: all .2s;
+    }
+    .copy-btn:hover { background: rgba(255,226,52,.2); }
+
+    /* ── Players list ── */
+    .players-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .player-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      animation: slideIn .3s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .player-avatar {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .player-name-text { font-size: 14px; font-weight: 500; flex: 1; }
+    .leader-badge {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      background: rgba(255,226,52,.15);
+      color: var(--accent3);
+      border: 1px solid rgba(255,226,52,.2);
+      border-radius: 4px;
+      padding: 2px 6px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    /* ── Config section ── */
+    .config-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .config-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .config-row .autocomplete-wrap { flex: 1; }
+
+    .config-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .config-badge span { color: var(--text); font-weight: 500; }
+
+    /* ── HUD (in-game) ── */
+    #screen-game { padding: 0; align-items: stretch; justify-content: flex-start; }
+
+    .game-hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 1000;
+      background: rgba(8,10,15,.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0;
+      height: 52px;
+    }
+    .hud-section {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      height: 100%;
+      border-right: 1px solid var(--border);
+    }
+    .hud-section:last-child { border-right: none; margin-left: auto; }
+    .hud-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+    .hud-value { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--accent); }
+    .hud-timer { font-family: var(--font-display); font-size: 24px; color: var(--accent3); }
+    .hud-target { font-size: 13px; font-weight: 600; color: var(--accent2); }
+    .hud-steps { font-family: var(--font-mono); font-size: 16px; font-weight: 600; color: var(--green); }
+
+    .game-iframe {
+      position: fixed;
+      top: 52px; left: 0; right: 0; bottom: 0;
+      border: none;
+      width: 100%;
+      height: calc(100vh - 52px);
+    }
+
+    /* ── Results screen ── */
+    .results-container {
+      width: 100%;
+      max-width: 800px;
+    }
+
+    .winner-banner {
+      background: linear-gradient(135deg, rgba(0,245,160,.1), rgba(0,229,255,.05));
+      border: 1px solid rgba(0,245,160,.3);
+      border-radius: 16px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .winner-banner::before {
+      content: '';
+      position: absolute;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: radial-gradient(circle, rgba(0,245,160,.08) 0%, transparent 60%);
+      animation: pulse 3s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: .7; }
+    }
+    .winner-crown { font-size: 48px; margin-bottom: 8px; }
+    .winner-name {
+      font-family: var(--font-display);
+      font-size: 48px;
+      color: var(--green);
+      letter-spacing: .05em;
+    }
+    .winner-time {
+      font-family: var(--font-mono);
+      font-size: 22px;
+      color: var(--accent3);
+      margin-top: 4px;
+    }
+
+    /* ── Path comparison ── */
+    .paths-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .path-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .path-card.winner-path { border-color: rgba(0,245,160,.4); }
+    .path-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .path-player-name { font-weight: 600; font-size: 15px; }
+    .path-meta {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .path-time-badge {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(0,229,255,.1);
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 3px 8px;
+    }
+    .path-steps-badge {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(0,245,160,.1);
+      color: var(--green);
+      border-radius: 6px;
+      padding: 3px 8px;
+    }
+    .path-trail {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .path-node {
+      font-size: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 4px 10px;
+      color: var(--text);
+      white-space: nowrap;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .path-node.start { border-color: rgba(0,229,255,.5); color: var(--accent); }
+    .path-node.end { border-color: rgba(0,245,160,.5); color: var(--green); }
+    .path-arrow { color: var(--muted); font-size: 12px; }
+    .path-dnf {
+      font-size: 12px;
+      color: var(--accent2);
+      font-family: var(--font-mono);
+      background: rgba(255,61,113,.1);
+      border: 1px solid rgba(255,61,113,.2);
+      border-radius: 6px;
+      padding: 4px 10px;
+    }
+
+    /* ── Error / notification ── */
+    .toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: var(--accent2);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 9999;
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all .3s cubic-bezier(.34,1.56,.64,1);
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { background: var(--green); color: #000; }
+
+    /* ── Loading spinner ── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid rgba(0,229,255,.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Countdown overlay ── */
+    .countdown-overlay {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(8,10,15,.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    .countdown-overlay.hidden { display: none; }
+    .countdown-label { font-size: 16px; color: var(--muted); letter-spacing: .2em; text-transform: uppercase; }
+    .countdown-num {
+      font-family: var(--font-display);
+      font-size: 160px;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--accent), var(--green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: countPop .5s ease;
+    }
+    @keyframes countPop {
+      from { transform: scale(1.4); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .countdown-route {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .countdown-start { color: var(--accent); }
+    .countdown-end { color: var(--accent2); }
+
+    /* ── Waiting indicator ── */
+    .waiting-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 12px;
+    }
+    .dot-pulse {
+      display: flex;
+      gap: 4px;
+    }
+    .dot-pulse span {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: dotBlink 1.4s ease-in-out infinite;
+    }
+    .dot-pulse span:nth-child(2) { animation-delay: .2s; }
+    .dot-pulse span:nth-child(3) { animation-delay: .4s; }
+    @keyframes dotBlink {
+      0%, 80%, 100% { opacity: .2; }
+      40% { opacity: 1; }
+    }
+
+    /* ── Avatar colors ── */
+    .av-0 { background: rgba(0,229,255,.15); color: var(--accent); }
+    .av-1 { background: rgba(255,61,113,.15); color: var(--accent2); }
+    .av-2 { background: rgba(0,245,160,.15); color: var(--green); }
+    .av-3 { background: rgba(255,226,52,.15); color: var(--accent3); }
+    .av-4 { background: rgba(171,71,188,.15); color: #ce93d8; }
+    .av-5 { background: rgba(255,152,0,.15); color: #ffb74d; }
+    .av-6 { background: rgba(33,150,243,.15); color: #64b5f6; }
+    .av-7 { background: rgba(233,30,99,.15); color: #f48fb1; }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .card { padding: 20px; }
+      .hero-title { font-size: 64px; }
+      .game-hud { flex-wrap: wrap; height: auto; }
+      .hud-section { padding: 8px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════ SCREEN: HOME ══════════════ -->
+<div id="screen-home" class="screen active">
+  <div class="hero-header">
+    <div class="hero-tag">🏆 Multiplayer Edition</div>
+    <h1 class="hero-title">WikiRace</h1>
+    <p class="hero-sub">Navigate Wikipedia. Beat your friends. Become legend.</p>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('create')">Create Room</button>
+      <button class="tab-btn" onclick="switchTab('join')">Join Room</button>
+    </div>
+
+    <!-- Create tab -->
+    <div id="tab-create" class="tab-pane active">
+      <label>Your Name</label>
+      <input type="text" id="create-name" placeholder="e.g. SpeedRunner42" maxlength="20">
+      <button class="btn btn-primary" onclick="createRoom()">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Create Room
+      </button>
+    </div>
+
+    <!-- Join tab -->
+    <div id="tab-join" class="tab-pane">
+      <label>Your Name</label>
+      <input type="text" id="join-name" placeholder="e.g. WikiMaster" maxlength="20">
+      <label>Room Code</label>
+      <input type="text" id="join-code" placeholder="e.g. AB3XY" maxlength="5" style="text-transform:uppercase; font-family:var(--font-mono); font-size:20px; letter-spacing:.15em;">
+      <button class="btn btn-primary" onclick="joinRoom()">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        Join Room
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SCREEN: LOBBY ══════════════ -->
+<div id="screen-lobby" class="screen">
+  <div style="width:100%;max-width:560px;">
+
+    <div class="hero-header" style="margin-bottom:28px;">
+      <h1 class="hero-title" style="font-size:48px;">Lobby</h1>
+    </div>
+
+    <!-- Room code -->
+    <div class="room-code-badge">
+      <div>
+        <div class="room-code-label">Room Code</div>
+        <div class="room-code-value" id="lobby-code">—</div>
+      </div>
+      <button class="copy-btn" onclick="copyCode()">COPY</button>
+    </div>
+
+    <!-- Players -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Players <span id="player-count" style="font-size:16px;color:var(--muted)"></span></div>
+      <div class="players-grid" id="players-list"></div>
+      <div class="waiting-status" id="waiting-msg">
+        <div class="dot-pulse"><span></span><span></span><span></span></div>
+        Waiting for players…
+      </div>
+    </div>
+
+    <!-- Config (leader only) -->
+    <div class="card" id="config-section" style="display:none; margin-bottom:16px;">
+      <div class="card-title">Game Config</div>
+      <label>Language</label>
+      <select id="config-lang" onchange="updateConfig()">
+        <option value="en">🇬🇧 English</option>
+        <option value="fr">🇫🇷 Français</option>
+        <option value="es">🇪🇸 Español</option>
+        <option value="de">🇩🇪 Deutsch</option>
+        <option value="it">🇮🇹 Italiano</option>
+        <option value="pt">🇵🇹 Português</option>
+        <option value="ja">🇯🇵 日本語</option>
+        <option value="zh">🇨🇳 中文</option>
+      </select>
+
+      <label>Start Page</label>
+      <div class="autocomplete-wrap">
+        <input type="text" id="config-start" placeholder="e.g. Albert Einstein" oninput="autocomplete(this,'start-list')" onkeydown="acKeydown(event,'start-list','config-start')">
+        <div class="autocomplete-list" id="start-list"></div>
+      </div>
+
+      <label>End Page (Target)</label>
+      <div class="autocomplete-wrap">
+        <input type="text" id="config-end" placeholder="e.g. Quantum mechanics" oninput="autocomplete(this,'end-list')" onkeydown="acKeydown(event,'end-list','config-end')">
+        <div class="autocomplete-list" id="end-list"></div>
+      </div>
+
+      <button class="btn btn-success" onclick="startGame()" id="start-btn">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        Start Game
+      </button>
+    </div>
+
+    <!-- Config display (non-leader) -->
+    <div class="card" id="config-view" style="display:none; margin-bottom:16px;">
+      <div class="card-title">Game Config</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="config-badge">🌐 Language: <span id="view-lang">—</span></div>
+        <div class="config-badge">🚀 Start: <span id="view-start">—</span></div>
+        <div class="config-badge">🎯 Target: <span id="view-end">—</span></div>
+      </div>
+    </div>
+
+    <!-- Leave button -->
+    <button class="btn btn-secondary" onclick="leaveRoom()">Leave Room</button>
+  </div>
+</div>
+
+<!-- ══════════════ SCREEN: GAME ══════════════ -->
+<div id="screen-game" class="screen">
+  <!-- HUD -->
+  <div class="game-hud">
+    <div class="hud-section">
+      <div>
+        <div class="hud-label">Start</div>
+        <div class="hud-value" id="hud-start" style="color:var(--accent)">—</div>
+      </div>
+    </div>
+    <div class="hud-section">
+      <svg width="16" height="16" fill="none" stroke="var(--muted)" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      <div>
+        <div class="hud-label">Target</div>
+        <div class="hud-target" id="hud-target">—</div>
+      </div>
+    </div>
+    <div class="hud-section">
+      <div>
+        <div class="hud-label">Steps</div>
+        <div class="hud-steps" id="hud-steps">0</div>
+      </div>
+    </div>
+    <div class="hud-section" style="margin-left:auto;border-right:none;">
+      <div class="hud-timer" id="hud-timer">0:00</div>
+    </div>
+  </div>
+
+  <!-- Wikipedia iframe -->
+  <iframe id="wiki-frame" class="game-iframe" src="about:blank" sandbox="allow-scripts allow-same-origin"></iframe>
+
+  <!-- Countdown overlay -->
+  <div class="countdown-overlay" id="countdown-overlay">
+    <div class="countdown-label">Get Ready</div>
+    <div class="countdown-num" id="countdown-num">3</div>
+    <div class="countdown-route">
+      <span class="countdown-start" id="cd-start">—</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="countdown-end" id="cd-end">—</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SCREEN: RESULTS ══════════════ -->
+<div id="screen-results" class="screen">
+  <div class="results-container">
+    <div class="hero-header" style="margin-bottom:28px;">
+      <div class="hero-tag">🏁 Game Over</div>
+    </div>
+
+    <div class="winner-banner">
+      <div class="winner-crown">👑</div>
+      <div class="winner-name" id="result-winner">—</div>
+      <div class="winner-time" id="result-time">—</div>
+    </div>
+
+    <div class="card" style="max-width:100%;margin-bottom:16px;">
+      <div class="card-title">Race Paths</div>
+      <div class="paths-grid" id="paths-grid"></div>
+    </div>
+
+    <button class="btn btn-primary" onclick="backToLobby()">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 12h18M9 6l-6 6 6 6"/></svg>
+      Back to Lobby
+    </button>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script>
+const socket = io();
+let myId = null;
+let currentRoom = null;
+let isLeader = false;
+let timerInterval = null;
+let startTime = null;
+let mySteps = 0;
+
+// ── Socket ID ──────────────────────────────────────────────────
+socket.on('connect', () => { myId = socket.id; });
+
+// ── Screens ───────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', (i===0&&tab==='create')||(i===1&&tab==='join')));
+  document.getElementById('tab-create').classList.toggle('active', tab==='create');
+  document.getElementById('tab-join').classList.toggle('active', tab==='join');
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function toast(msg, type='error') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (type==='success' ? ' success' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Create / Join ─────────────────────────────────────────────
+function createRoom() {
+  const name = document.getElementById('create-name').value.trim();
+  if (!name) return toast('Enter your name first');
+  socket.emit('createRoom', { playerName: name });
+}
+
+function joinRoom() {
+  const name = document.getElementById('join-name').value.trim();
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (!name) return toast('Enter your name first');
+  if (code.length < 3) return toast('Enter a valid room code');
+  socket.emit('joinRoom', { code, playerName: name });
+}
+
+socket.on('roomCreated', ({ code, room }) => {
+  currentRoom = room; isLeader = true;
+  enterLobby(code, room);
+});
+socket.on('joinedRoom', ({ code, room }) => {
+  currentRoom = room; isLeader = room.leader === myId;
+  enterLobby(code, room);
+});
+socket.on('error', ({ message }) => toast(message));
+
+// ── Lobby ─────────────────────────────────────────────────────
+function enterLobby(code, room) {
+  document.getElementById('lobby-code').textContent = code;
+  renderPlayers(room);
+  document.getElementById('config-section').style.display = isLeader ? 'block' : 'none';
+  document.getElementById('config-view').style.display = isLeader ? 'none' : 'block';
+  showScreen('lobby');
+}
+
+function renderPlayers(room) {
+  const list = document.getElementById('players-list');
+  const colors = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7'];
+  list.innerHTML = room.players.map((p,i) => `
+    <div class="player-row">
+      <div class="player-avatar ${colors[i%8]}">${p.name[0].toUpperCase()}</div>
+      <div class="player-name-text">${p.name} ${p.id===myId?'<span style="color:var(--muted);font-size:11px">(you)</span>':''}</div>
+      ${p.id===room.leader?'<span class="leader-badge">Leader</span>':''}
+    </div>`).join('');
+  document.getElementById('player-count').textContent = `(${room.players.length}/8)`;
+}
+
+function updateConfigView(config) {
+  document.getElementById('view-lang').textContent = config.lang || '—';
+  document.getElementById('view-start').textContent = config.startPage || '—';
+  document.getElementById('view-end').textContent = config.endPage || '—';
+  if (isLeader) {
+    const l = document.getElementById('config-lang');
+    if (l.value !== config.lang && config.lang) l.value = config.lang;
+  }
+}
+
+socket.on('playerJoined', ({ room }) => {
+  currentRoom = room;
+  renderPlayers(room);
+});
+socket.on('playerLeft', ({ room }) => {
+  currentRoom = room;
+  renderPlayers(room);
+  toast(`A player left`, 'error');
+});
+socket.on('leaderChanged', ({ newLeaderId }) => {
+  if (newLeaderId === myId) {
+    isLeader = true;
+    document.getElementById('config-section').style.display = 'block';
+    document.getElementById('config-view').style.display = 'none';
+    toast('You are now the leader!', 'success');
+  }
+});
+socket.on('configUpdated', ({ config }) => {
+  updateConfigView(config);
+});
+
+socket.on('returnedToLobby', ({ room }) => {
+  currentRoom = room;
+  isLeader = room.leader === myId;
+  enterLobby(room.code, room);
+  updateConfigView(room.config);
+  toast('Back to lobby', 'success');
+});
+
+function copyCode() {
+  const code = document.getElementById('lobby-code').textContent;
+  navigator.clipboard.writeText(code).then(() => toast('Code copied!', 'success'));
+}
+
+function leaveRoom() {
+  location.reload();
+}
+
+// ── Config / Autocomplete ─────────────────────────────────────
+function updateConfig() {
+  const lang = document.getElementById('config-lang').value;
+  const startPage = document.getElementById('config-start').value.trim();
+  const endPage = document.getElementById('config-end').value.trim();
+  socket.emit('updateConfig', { lang, startPage, endPage });
+}
+
+let acDebounce = {};
+function autocomplete(input, listId) {
+  const q = input.value.trim();
+  const list = document.getElementById(listId);
+  updateConfig();
+  clearTimeout(acDebounce[listId]);
+  if (q.length < 2) { list.classList.remove('open'); return; }
+  acDebounce[listId] = setTimeout(async () => {
+    const lang = document.getElementById('config-lang')?.value || 'en';
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&lang=${lang}`);
+      const results = await r.json();
+      list.innerHTML = results.map(s => `<div class="autocomplete-item" onclick="selectAc(this,'${listId}')">${s}</div>`).join('');
+      list.classList.toggle('open', results.length > 0);
+    } catch {}
+  }, 220);
+}
+
+function selectAc(el, listId) {
+  const text = el.textContent;
+  if (listId === 'start-list') document.getElementById('config-start').value = text;
+  if (listId === 'end-list') document.getElementById('config-end').value = text;
+  document.getElementById(listId).classList.remove('open');
+  updateConfig();
+}
+
+function acKeydown(e, listId, inputId) {
+  const list = document.getElementById(listId);
+  const items = list.querySelectorAll('.autocomplete-item');
+  const selected = list.querySelector('.selected');
+  let idx = Array.from(items).indexOf(selected);
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx+1, items.length-1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx-1, 0); }
+  else if (e.key === 'Enter' && selected) { selectAc(selected, listId); return; }
+  else if (e.key === 'Escape') { list.classList.remove('open'); return; }
+  items.forEach((it,i) => it.classList.toggle('selected', i===idx));
+}
+
+// Close autocomplete on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete-wrap')) {
+    document.querySelectorAll('.autocomplete-list').forEach(l => l.classList.remove('open'));
+  }
+});
+
+// ── Start Game ────────────────────────────────────────────────
+function startGame() {
+  const start = document.getElementById('config-start').value.trim();
+  const end = document.getElementById('config-end').value.trim();
+  if (!start || !end) return toast('Set start and end pages');
+  if (start === end) return toast('Start and end must differ');
+  updateConfig();
+  socket.emit('startGame');
+}
+
+socket.on('gameStarted', ({ config, startTime: st }) => {
+  startTime = st;
+  mySteps = 0;
+  currentRoom.config = config;
+  launchCountdown(config);
+});
+
+function launchCountdown(config) {
+  const overlay = document.getElementById('countdown-overlay');
+  const numEl = document.getElementById('countdown-num');
+  document.getElementById('cd-start').textContent = config.startPage;
+  document.getElementById('cd-end').textContent = config.endPage;
+  document.getElementById('hud-start').textContent = config.startPage;
+  document.getElementById('hud-target').textContent = config.endPage;
+  document.getElementById('hud-steps').textContent = '0';
+  overlay.classList.remove('hidden');
+  showScreen('game');
+
+  let n = 3;
+  numEl.textContent = n;
+  const id = setInterval(() => {
+    n--;
+    if (n <= 0) {
+      clearInterval(id);
+      numEl.textContent = 'GO!';
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+        navigateTo(`/wiki/${config.lang}/${encodeURIComponent(config.startPage)}`);
+        startTimer();
+      }, 600);
+    } else {
+      numEl.textContent = n;
+      numEl.style.animation = 'none';
+      void numEl.offsetWidth;
+      numEl.style.animation = 'countPop .5s ease';
+    }
+  }, 1000);
+}
+
+// ── Timer ─────────────────────────────────────────────────────
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const s = Math.floor(elapsed / 1000);
+    const m = Math.floor(s / 60);
+    document.getElementById('hud-timer').textContent = `${m}:${String(s%60).padStart(2,'0')}`;
+  }, 500);
+}
+
+function stopTimer() { clearInterval(timerInterval); }
+
+function formatTime(ms) {
+  if (!ms && ms !== 0) return 'DNF';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s%60).padStart(2,'0')}`;
+}
+
+// ── Wiki navigation ───────────────────────────────────────────
+function navigateTo(href) {
+  document.getElementById('wiki-frame').src = href;
+}
+
+// Receive navigation from iframe
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'wikiNav') {
+    const href = e.data.href;
+    navigateTo(href);
+    // Extract page title from /wiki/lang/TITLE
+    const parts = href.split('/');
+    const title = decodeURIComponent(parts[parts.length - 1]).replace(/_/g, ' ');
+    mySteps++;
+    document.getElementById('hud-steps').textContent = mySteps;
+    socket.emit('navigate', { title });
+  }
+});
+
+socket.on('pathUpdate', ({ playerId, path }) => {
+  // Could show mini-paths for other players in HUD if desired
+});
+
+// ── Game Finished ─────────────────────────────────────────────
+socket.on('gameFinished', ({ winnerId, winnerName, winnerTime, results }) => {
+  stopTimer();
+  showResults({ winnerId, winnerName, winnerTime, results });
+});
+
+function showResults({ winnerName, winnerTime, results }) {
+  document.getElementById('result-winner').textContent = winnerName;
+  document.getElementById('result-time').textContent = `⏱ ${formatTime(winnerTime)}`;
+
+  const grid = document.getElementById('paths-grid');
+  grid.innerHTML = results.sort((a,b) => {
+    if (a.finished && b.finished) return a.time - b.time;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+    return b.path.length - a.path.length;
+  }).map((p, i) => {
+    const pathHtml = p.finished ? p.path.map((node, j) => {
+      const cls = j===0?'start':j===p.path.length-1?'end':'';
+      return `<span class="path-node ${cls}" title="${node}">${node}</span>${j<p.path.length-1?'<span class="path-arrow">→</span>':''}`;
+    }).join('') : `<span class="path-dnf">Did not finish (${p.path.length} steps)</span>`;
+
+    return `
+    <div class="path-card ${i===0?'winner-path':''}">
+      <div class="path-header">
+        <div class="path-player-name">${i===0?'👑 ':''}${p.name}</div>
+        <div class="path-meta">
+          ${p.finished?`<span class="path-time-badge">${formatTime(p.time)}</span>`:''}
+          <span class="path-steps-badge">${p.path.length} steps</span>
+        </div>
+      </div>
+      <div class="path-trail">${pathHtml}</div>
+    </div>`;
+  }).join('');
+
+  showScreen('results');
+}
+
+function backToLobby() {
+  stopTimer();
+  socket.emit('returnToLobby');
+}
+</script>
+</body>
+</html>
