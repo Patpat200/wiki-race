@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Autocomplete</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #1a1a1a; color: #fff; }
+    .test { margin: 20px 0; padding: 10px; background: #222; border-left: 3px solid #00e5ff; }
+    input { width: 300px; padding: 8px; font-size: 14px; margin-right: 10px; }
+    #results { margin-top: 20px; }
+    .result-item { padding: 8px; background: #333; margin: 5px 0; border-radius: 4px; }
+    .error { color: #ff6b6b; }
+    .success { color: #00f5a0; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Test Autocomplete API</h1>
+  
+  <div class="test">
+    <h2>Test 1: Direct API Call</h2>
+    <input type="text" id="testInput" placeholder="Tapez quelque chose...">
+    <button onclick="testApi()">Test Now</button>
+    <div id="apiResult"></div>
+  </div>
+
+  <div class="test">
+    <h2>Test 2: API Response Status</h2>
+    <button onclick="checkApiStatus()">Check API Status</button>
+    <div id="statusResult"></div>
+  </div>
+
+  <div class="test">
+    <h2>Test 3: Popular Pages (Should be in memory)</h2>
+    <button onclick="checkLocalPages()">Check Local Pages</button>
+    <div id="localResult"></div>
+  </div>
+
+  <script>
+    async function testApi() {
+      const q = document.getElementById('testInput').value.trim();
+      if (q.length < 2) {
+        document.getElementById('apiResult').innerHTML = '<div class="error">Minimum 2 characters</div>';
+        return;
+      }
+      
+      document.getElementById('apiResult').innerHTML = '<div>Loading...</div>';
+      try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&lang=en`);
+        const data = await response.json();
+        
+        let html = `<div class="success">✓ API returned ${data.length} results:</div>`;
+        data.forEach(item => {
+          html += `<div class="result-item">• ${item}</div>`;
+        });
+        document.getElementById('apiResult').innerHTML = html;
+      } catch (err) {
+        document.getElementById('apiResult').innerHTML = `<div class="error">✗ Error: ${err.message}</div>`;
+      }
+    }
+
+    async function checkApiStatus() {
+      document.getElementById('statusResult').innerHTML = '<div>Loading...</div>';
+      try {
+        const response = await fetch(`/api/search?q=test&lang=en`, { timeout: 5000 });
+        document.getElementById('statusResult').innerHTML = `<div class="success">✓ API is responding (Status: ${response.status})</div>`;
+      } catch (err) {
+        document.getElementById('statusResult').innerHTML = `<div class="error">✗ API Error: ${err.message}</div>`;
+      }
+    }
+
+    function checkLocalPages() {
+      const popularPages = {
+        en: ['Albert Einstein', 'Isaac Newton', 'Marie Curie', 'Stephen Hawking', 'Nikola Tesla',
+             'Charles Darwin', 'Galileo Galilei', 'Carl Sagan', 'Richard Feynman', 'Alan Turing',
+             'Computer', 'Physics', 'Biology', 'Chemistry', 'Mathematics', 'History', 'Art',
+             'Music', 'Literature', 'Science', 'Technology', 'Space', 'Universe', 'Quantum mechanics',
+             'Theory of relativity', 'DNA', 'Evolution', 'Internet', 'Artificial intelligence']
+      };
+      
+      let html = `<div class="success">✓ Found ${popularPages.en.length} local pages:</div>`;
+      popularPages.en.forEach(page => {
+        html += `<div class="result-item">• ${page}</div>`;
+      });
+      document.getElementById('localResult').innerHTML = html;
+    }
+
+    // Auto-test on load
+    window.addEventListener('load', async () => {
+      await checkApiStatus();
+      checkLocalPages();
+    });
+  </script>
+</body>
+</html>
